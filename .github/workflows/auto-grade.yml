@@ -1,0 +1,225 @@
+name: Auto Grade Submission
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  grade:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Fetch all history for TDD check
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Initialize score
+        id: init
+        run: |
+          echo "score=0" >> $GITHUB_OUTPUT
+          echo "max_score=100" >> $GITHUB_OUTPUT
+
+      - name: Check personal answers exist (10 points)
+        id: check_answers
+        run: |
+          if [ -f "CANDIDATE_ANSWERS.md" ]; then
+            word_count=$(wc -w < CANDIDATE_ANSWERS.md)
+            if [ $word_count -gt 100 ]; then
+              echo "✅ Personal answers submitted ($word_count words)"
+              echo "points=10" >> $GITHUB_OUTPUT
+            else
+              echo "❌ Personal answers too short ($word_count words)"
+              echo "points=0" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "❌ CANDIDATE_ANSWERS.md not found"
+            echo "points=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check tests exist (10 points)
+        id: check_tests
+        run: |
+          if [ -f "src/components/FocusTimer.test.tsx" ]; then
+            echo "✅ Test file exists"
+            echo "points=10" >> $GITHUB_OUTPUT
+          else
+            echo "❌ FocusTimer.test.tsx not found"
+            echo "points=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check TDD - Tests written FIRST (20 points bonus)
+        id: check_tdd
+        run: |
+          # Check if test file was committed before component file
+          if [ -f "src/components/FocusTimer.test.tsx" ] && [ -f "src/components/FocusTimer.tsx" ]; then
+            test_commit=$(git log --format=%H --follow src/components/FocusTimer.test.tsx | tail -1)
+            component_commit=$(git log --format=%H --follow src/components/FocusTimer.tsx | tail -1)
+            
+            test_date=$(git show -s --format=%ct $test_commit)
+            component_date=$(git show -s --format=%ct $component_commit)
+            
+            if [ $test_date -lt $component_date ]; then
+              echo "✅ TDD BONUS! Tests written before component"
+              echo "points=20" >> $GITHUB_OUTPUT
+            else
+              echo "ℹ️ Tests exist but not written first (no bonus)"
+              echo "points=0" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "ℹ️ Cannot check TDD (missing files)"
+            echo "points=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check component exists (15 points)
+        id: check_component
+        run: |
+          if [ -f "src/components/FocusTimer.tsx" ]; then
+            if grep -q "export.*FocusTimer" src/components/FocusTimer.tsx; then
+              echo "✅ FocusTimer component exists and exports"
+              echo "points=15" >> $GITHUB_OUTPUT
+            else
+              echo "❌ FocusTimer exists but doesn't export properly"
+              echo "points=5" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "❌ FocusTimer.tsx not found"
+            echo "points=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run tests (20 points for countdown logic)
+        id: run_tests
+        continue-on-error: true
+        run: |
+          if npm test 2>&1 | tee test_output.log; then
+            # Check if countdown test passes
+            if grep -q "countdown" test_output.log && grep -q "✓" test_output.log; then
+              echo "✅ Countdown logic tests pass"
+              echo "points=20" >> $GITHUB_OUTPUT
+            else
+              echo "⚠️ Tests run but countdown logic incomplete"
+              echo "points=10" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "❌ Tests failed or don't exist"
+            echo "points=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check audio implementation (15 points)
+        id: check_audio
+        run: |
+          if [ -f "src/components/FocusTimer.tsx" ]; then
+            if grep -q "audio\|Audio\|sound\|play()" src/components/FocusTimer.tsx; then
+              echo "✅ Audio implementation found"
+              echo "points=15" >> $GITHUB_OUTPUT
+            else
+              echo "❌ No audio implementation detected"
+              echo "points=0" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "points=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check good judgment - trap detection (10 points)
+        id: check_judgment
+        run: |
+          if [ -f "src/components/FocusTimer.tsx" ]; then
+            if grep -qi "dark.*one.*blessed\|blessed.*timer" src/components/FocusTimer.tsx; then
+              echo "❌ TRAP NOT CAUGHT - kept inappropriate button name"
+              echo "points=0" >> $GITHUB_OUTPUT
+            else
+              echo "✅ Good judgment shown - renamed button appropriately"
+              echo "points=10" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "points=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Calculate total score
+        id: calculate
+        run: |
+          total=$((
+            ${{ steps.check_answers.outputs.points }} + 
+            ${{ steps.check_tests.outputs.points }} + 
+            ${{ steps.check_tdd.outputs.points }} + 
+            ${{ steps.check_component.outputs.points }} + 
+            ${{ steps.run_tests.outputs.points }} + 
+            ${{ steps.check_audio.outputs.points }} + 
+            ${{ steps.check_judgment.outputs.points }}
+          ))
+          echo "score=$total" >> $GITHUB_OUTPUT
+          
+          # Create score badge
+          if [ $total -ge 90 ]; then
+            badge="🏆 Excellent"
+          elif [ $total -ge 70 ]; then
+            badge="✅ Good"
+          elif [ $total -ge 50 ]; then
+            badge="✓ Passing"
+          else
+            badge="⚠️ Needs Work"
+          fi
+          echo "badge=$badge" >> $GITHUB_OUTPUT
+
+      - name: Post score comment
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const score = ${{ steps.calculate.outputs.score }};
+            const badge = "${{ steps.calculate.outputs.badge }}";
+            
+            const breakdown = `
+            ## ${badge} Score: ${score}/110 points
+            
+            ### Detailed Breakdown:
+            
+            | Criteria | Points | Status |
+            |----------|--------|--------|
+            | Personal Answers | ${{ steps.check_answers.outputs.points }}/10 | ${{ steps.check_answers.outputs.points == 10 && '✅' || '❌' }} |
+            | Tests Exist | ${{ steps.check_tests.outputs.points }}/10 | ${{ steps.check_tests.outputs.points == 10 && '✅' || '❌' }} |
+            | TDD Bonus (Tests First) | ${{ steps.check_tdd.outputs.points }}/20 | ${{ steps.check_tdd.outputs.points == 20 && '✅' || steps.check_tdd.outputs.points > 0 && 'ℹ️' || '—' }} |
+            | Component Renders | ${{ steps.check_component.outputs.points }}/15 | ${{ steps.check_component.outputs.points == 15 && '✅' || steps.check_component.outputs.points > 0 && '⚠️' || '❌' }} |
+            | Countdown Logic | ${{ steps.run_tests.outputs.points }}/20 | ${{ steps.run_tests.outputs.points == 20 && '✅' || steps.run_tests.outputs.points > 0 && '⚠️' || '❌' }} |
+            | Audio Alert | ${{ steps.check_audio.outputs.points }}/15 | ${{ steps.check_audio.outputs.points == 15 && '✅' || '❌' }} |
+            | Good Judgment | ${{ steps.check_judgment.outputs.points }}/10 | ${{ steps.check_judgment.outputs.points == 10 && '✅' || '❌' }} |
+            
+            ### What This Means:
+            ${score >= 90 ? '🎉 **Outstanding work!** You\'re very likely to advance to interviews.' :
+              score >= 70 ? '👍 **Solid submission!** You\'ll definitely be considered.' :
+              score >= 50 ? '✓ **You passed the basics.** May be considered based on other factors.' :
+              '⚠️ **More work needed.** Focus on completing the core requirements.'}
+            
+            ### Next Steps:
+            - You can keep improving your score until the deadline
+            - Every push triggers a new grading run
+            - Dan will review top scorers manually
+            
+            *This is an automated score. The test will officially close on Day 8.*
+            `;
+            
+            // Comment on commit
+            github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: breakdown
+            });
+
+      - name: Fail if score too low (optional warning)
+        if: steps.calculate.outputs.score < 30
+        run: |
+          echo "⚠️ WARNING: Score is below 30 points"
+          echo "This likely means major requirements are missing"
+          echo "Review the manual and try again!"
+          exit 1

@@ -1,0 +1,68 @@
+name: Auto-Close After Deadline
+
+on:
+  schedule:
+    # Run daily at midnight UTC (adjust timezone as needed)
+    - cron: '0 0 * * *'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  check-deadline:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Check if deadline passed
+        id: check
+        run: |
+          # Get repository creation time (when student accepted assignment)
+          CREATED_AT=$(gh api repos/${{ github.repository }} --jq '.created_at')
+          CREATED_TIMESTAMP=$(date -d "$CREATED_AT" +%s)
+          
+          # Calculate deadline (7 days + 1 day = 8 days from creation)
+          DEADLINE_TIMESTAMP=$((CREATED_TIMESTAMP + 8*24*60*60))
+          CURRENT_TIMESTAMP=$(date +%s)
+          
+          echo "Repository created: $CREATED_AT"
+          echo "Deadline: $(date -d @$DEADLINE_TIMESTAMP)"
+          echo "Current time: $(date)"
+          
+          if [ $CURRENT_TIMESTAMP -gt $DEADLINE_TIMESTAMP ]; then
+            echo "deadline_passed=true" >> $GITHUB_OUTPUT
+          else
+            echo "deadline_passed=false" >> $GITHUB_OUTPUT
+            DAYS_LEFT=$(( (DEADLINE_TIMESTAMP - CURRENT_TIMESTAMP) / 86400 ))
+            echo "Days remaining: $DAYS_LEFT"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Close repository if deadline passed
+        if: steps.check.outputs.deadline_passed == 'true'
+        run: |
+          echo "⏰ Deadline has passed. Closing repository..."
+          
+          # Lock all issues and PRs
+          gh issue list --state open --json number --jq '.[].number' | while read issue; do
+            gh issue close $issue --comment "Auto-closed: Deadline passed"
+          done
+          
+          # Create a final summary issue
+          gh issue create \
+            --title "🔒 Submission Closed - Final Score" \
+            --body "This repository has been automatically closed as the 7-day deadline has passed. Your final score has been calculated. Dan will review submissions and contact top candidates within 1 week. Thank you for participating!"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Run final grading
+        if: steps.check.outputs.deadline_passed == 'true'
+        uses: ./.github/workflows/auto-grade.yml
+        
+      - name: Archive repository
+        if: steps.check.outputs.deadline_passed == 'true'
+        run: |
+          # Create archive tag
+          git tag -a "final-submission-$(date +%Y%m%d)" -m "Final submission archived"
+          git push origin --tags || true
