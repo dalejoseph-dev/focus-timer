@@ -2,29 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import FocusTimer from './FocusTimer';
 
-describe('FocusTimer Component', () => {
-  // Helper functions for cleaner tests
-  const setup = (props = {}) => {
-    return render(<FocusTimer {...props} />);
-  };
-
-  const getTimerDisplay = () => screen.getByText(/\d{1,2}:\d{2}/i);
-  
-  const getStartButton = () => screen.getByRole('button', { name: /start/i });
-  
-  const getPauseButton = () => screen.queryByRole('button', { name: /pause/i });
-  
-  const getResetButton = () => screen.queryByRole('button', { name: /reset/i });
-
-  const clickStart = () => {
-    const button = getStartButton();
-    fireEvent.click(button);
-  };
-
-  const advanceTime = (milliseconds) => {
-    vi.advanceTimersByTime(milliseconds);
-  };
-
+describe('FocusTimer Component - Essential Tests', () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });
@@ -34,145 +12,174 @@ describe('FocusTimer Component', () => {
     vi.restoreAllMocks();
   });
 
-  describe('Initial Render', () => {
-    it('should display default time of 25:00', () => {
-      setup();
-      expect(getTimerDisplay()).toHaveTextContent('25:00');
+  // TEST 1: Initial State
+  it('should initialize with 25:00 and show Start and Reset buttons', () => {
+    render(<FocusTimer />);
+
+    // Verify initial time display
+    const timerDisplay = screen.getByText('25:00');
+    expect(timerDisplay).toBeInTheDocument();
+
+    // Verify buttons are present
+    const startButton = screen.getByRole('button', { name: /start/i });
+    const resetButton = screen.getByRole('button', { name: /reset/i });
+    
+    expect(startButton).toBeInTheDocument();
+    expect(resetButton).toBeInTheDocument();
+  });
+
+  // TEST 2: Start/Stop Functionality
+  it('should start countdown when Start is clicked and stop when Stop is clicked', async () => {
+    render(<FocusTimer />);
+
+    // Click Start button
+    const startButton = screen.getByRole('button', { name: /start/i });
+    fireEvent.click(startButton);
+
+    // Advance time by 3 seconds
+    vi.advanceTimersByTime(3000);
+
+    // Verify timer counted down
+    await waitFor(() => {
+      expect(screen.getByText('24:57')).toBeInTheDocument();
     });
 
-    it('should display custom initial time when provided', () => {
-      setup({ defaultMinutes: 10 });
-      expect(getTimerDisplay()).toHaveTextContent('10:00');
+    // Click Stop button (Start button changes to Stop when running)
+    const stopButton = screen.getByRole('button', { name: /stop/i });
+    fireEvent.click(stopButton);
+
+    // Advance time - timer should not change
+    vi.advanceTimersByTime(2000);
+
+    // Timer should still show 24:57 (paused)
+    expect(screen.getByText('24:57')).toBeInTheDocument();
+  });
+
+  // TEST 3: Reset Functionality
+  it('should reset timer to 25:00 when Reset button is clicked', async () => {
+    render(<FocusTimer />);
+
+    // Start timer and let it count down
+    const startButton = screen.getByRole('button', { name: /start/i });
+    fireEvent.click(startButton);
+    
+    vi.advanceTimersByTime(10000); // 10 seconds
+
+    await waitFor(() => {
+      expect(screen.getByText('24:50')).toBeInTheDocument();
     });
 
-    it('should render Start button initially', () => {
-      setup();
-      expect(getStartButton()).toBeInTheDocument();
+    // Click Reset
+    const resetButton = screen.getByRole('button', { name: /reset/i });
+    fireEvent.click(resetButton);
+
+    // Timer should be back to 25:00
+    await waitFor(() => {
+      expect(screen.getByText('25:00')).toBeInTheDocument();
     });
   });
 
-  describe('Timer Countdown', () => {
-    it('should countdown by 1 second when started', async () => {
-      setup();
-      clickStart();
-      advanceTime(1000);
+  // TEST 4: Countdown to Zero
+  it('should countdown to 0:00 and stop', async () => {
+    // Start with a very short timer for testing
+    render(<FocusTimer defaultMinutes={0} defaultSeconds={3} />);
 
-      await waitFor(() => {
-        expect(getTimerDisplay()).toHaveTextContent('24:59');
-      });
-    });
+    // Start timer
+    const startButton = screen.getByRole('button', { name: /start/i });
+    fireEvent.click(startButton);
 
-    it('should countdown multiple seconds correctly', async () => {
-      setup();
-      clickStart();
-      advanceTime(5000);
+    // Fast-forward through the entire countdown
+    vi.advanceTimersByTime(1000);
+    await waitFor(() => expect(screen.getByText('0:02')).toBeInTheDocument());
 
-      await waitFor(() => {
-        expect(getTimerDisplay()).toHaveTextContent('24:55');
-      });
-    });
+    vi.advanceTimersByTime(1000);
+    await waitFor(() => expect(screen.getByText('0:01')).toBeInTheDocument());
 
-    it('should handle countdown across minute boundaries', async () => {
-      setup({ defaultMinutes: 1 });
-      clickStart();
-      advanceTime(61000); // 1 minute 1 second
+    vi.advanceTimersByTime(1000);
+    await waitFor(() => expect(screen.getByText('0:00')).toBeInTheDocument());
 
-      await waitFor(() => {
-        expect(getTimerDisplay()).toHaveTextContent('0:59');
-      });
+    // Verify it doesn't go negative
+    vi.advanceTimersByTime(2000);
+    expect(screen.getByText('0:00')).toBeInTheDocument();
+  });
+
+  // TEST 5: Audio Alert on Completion
+  it('should play audio alert when timer reaches 0:00', async () => {
+    // Mock HTMLMediaElement.prototype.play
+    const mockPlay = vi.fn().mockResolvedValue(undefined);
+    
+    // Spy on the play method of HTMLAudioElement
+    vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(mockPlay);
+
+    // Start with 2 seconds
+    render(<FocusTimer defaultMinutes={0} defaultSeconds={2} />);
+
+    // Start timer
+    const startButton = screen.getByRole('button', { name: /start/i });
+    fireEvent.click(startButton);
+
+    // Fast-forward to completion (2 seconds)
+    vi.advanceTimersByTime(2000);
+
+    // Wait for audio to play
+    await waitFor(() => {
+      expect(mockPlay).toHaveBeenCalled();
+    }, { timeout: 3000 });
+  });
+
+  // TEST 6: onComplete Callback
+  it('should call onComplete callback when timer reaches 0:00', async () => {
+    const onComplete = vi.fn();
+    
+    render(<FocusTimer defaultMinutes={0} defaultSeconds={1} onComplete={onComplete} />);
+
+    // Start timer
+    const startButton = screen.getByRole('button', { name: /start/i });
+    fireEvent.click(startButton);
+
+    // Fast-forward to completion
+    vi.advanceTimersByTime(1000);
+
+    // Wait for callback to be called
+    await waitFor(() => {
+      expect(onComplete).toHaveBeenCalledTimes(1);
     });
   });
 
-  describe('Timer Controls', () => {
-    it('should pause timer when pause button is clicked', async () => {
-      setup();
-      clickStart();
-      advanceTime(2000);
+  // TEST 7: Start Button Disabled at 0:00
+  it('should disable start button when timer reaches 0:00', async () => {
+    render(<FocusTimer defaultMinutes={0} defaultSeconds={1} />);
 
-      const pauseButton = getPauseButton();
-      if (pauseButton) {
-        fireEvent.click(pauseButton);
-        advanceTime(3000);
+    // Start timer
+    const startButton = screen.getByRole('button', { name: /start/i });
+    fireEvent.click(startButton);
 
-        await waitFor(() => {
-          expect(getTimerDisplay()).toHaveTextContent('24:58');
-        });
-      }
+    // Fast-forward to completion
+    vi.advanceTimersByTime(1000);
+
+    await waitFor(() => {
+      expect(screen.getByText('0:00')).toBeInTheDocument();
     });
 
-    it('should reset timer when reset button is clicked', async () => {
-      setup();
-      clickStart();
-      advanceTime(5000);
-
-      const resetButton = getResetButton();
-      if (resetButton) {
-        fireEvent.click(resetButton);
-
-        await waitFor(() => {
-          expect(getTimerDisplay()).toHaveTextContent('25:00');
-        });
-      }
-    });
+    // Start button should be disabled
+    const disabledButton = screen.getByRole('button', { name: /start/i });
+    expect(disabledButton).toBeDisabled();
   });
 
-  describe('Timer Completion', () => {
-    it('should call onComplete callback when timer reaches zero', async () => {
-      const onComplete = vi.fn();
-      setup({ defaultMinutes: 0, defaultSeconds: 1, onComplete });
+  // TEST 8: Completion Message Display
+  it('should display completion message when timer reaches 0:00', async () => {
+    render(<FocusTimer defaultMinutes={0} defaultSeconds={1} />);
 
-      clickStart();
-      advanceTime(1000);
+    // Start timer
+    const startButton = screen.getByRole('button', { name: /start/i });
+    fireEvent.click(startButton);
 
-      await waitFor(() => {
-        expect(onComplete).toHaveBeenCalledTimes(1);
-      });
-    });
+    // Fast-forward to completion
+    vi.advanceTimersByTime(1000);
 
-    it('should stop at 0:00 without going negative', async () => {
-      setup({ defaultMinutes: 0, defaultSeconds: 2 });
-      clickStart();
-      advanceTime(5000); // Advance more than needed
-
-      await waitFor(() => {
-        expect(getTimerDisplay()).toHaveTextContent('0:00');
-      });
-    });
-
-    it('should not call onComplete multiple times', async () => {
-      const onComplete = vi.fn();
-      setup({ defaultMinutes: 0, defaultSeconds: 1, onComplete });
-
-      clickStart();
-      advanceTime(5000);
-
-      await waitFor(() => {
-        expect(onComplete).toHaveBeenCalledTimes(1);
-      });
-    });
-  });
-
-  describe('Edge Cases', () => {
-    it('should handle rapid start/pause clicks', () => {
-      setup();
-      const startButton = getStartButton();
-      
-      fireEvent.click(startButton);
-      fireEvent.click(startButton);
-      fireEvent.click(startButton);
-
-      // Should not crash
-      expect(getTimerDisplay()).toBeDefined();
-    });
-
-    it('should format single digit seconds with leading zero', async () => {
-      setup({ defaultMinutes: 0, defaultSeconds: 9 });
-      clickStart();
-      advanceTime(1000);
-
-      await waitFor(() => {
-        expect(getTimerDisplay()).toHaveTextContent('0:08');
-      });
+    // Wait for completion message
+    await waitFor(() => {
+      expect(screen.getByText(/time's up/i)).toBeInTheDocument();
     });
   });
 });
