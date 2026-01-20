@@ -1,6 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
 import '../styles/FocusTimer.css';
 
+// Make sure types are exported
+export interface Task {
+    id: string;
+    text: string;
+    completed: boolean;
+}
+
+// Make sure props are typed
 interface FocusTimerProps {
     defaultMinutes?: number;
     onComplete?: () => void;
@@ -65,7 +73,7 @@ const FocusTimer = ({ defaultMinutes = 25, onComplete }: FocusTimerProps) => {
                 </button>
             </div>
 
-            <audio ref={audioRef} src="../public/aler.wav" /> 
+            <audio ref={audioRef} src="../public/alert.wav" /> 
         </div>
     );
 };
