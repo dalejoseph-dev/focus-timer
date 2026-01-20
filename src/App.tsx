@@ -22,19 +22,24 @@ function App() {
     setNewTaskText('');
   };
 
-  // Find first incomplete task
-  const handleTimerComplete = () => {
-    console.log('Focus session complete!');
+ const handleTimerComplete = () => {
+  // 1. FIND the first incomplete task
+  const firstIncomplete = tasks.find(t => !t.completed);
 
-    const firstIncomplete = tasks.find(t => !t.completed);
-
-    if(firstIncomplete){
-      handleToggleComplete(firstIncomplete.id);
-    }
-
-    // Play a more satisfying message
-    alert('Great work! task completed 🎉')
-  };
+  // 2. UPDATE its completed status
+  if (firstIncomplete) {
+    // 3. Use functional update to ensure correct state
+    setTasks(prevTasks => 
+      prevTasks.map(task => 
+        task.id === firstIncomplete.id 
+          ? { ...task, completed: true }  // Mark as complete
+          : task                          // Keep others unchanged
+      )
+    );
+    
+    alert(`Great work! "${firstIncomplete.text}" completed 🎉`);
+  }
+};
 
   // Then use it:
     <FocusTimer 
