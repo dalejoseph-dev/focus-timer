@@ -89,3 +89,4 @@ Your submission is graded on 7 criteria:
 **Ready?** Open `MANUAL.md` and start with Chapter 1!
 
 Good luck! 🚀
+# focus-timer
